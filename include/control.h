@@ -3,6 +3,8 @@
 #ifndef CONTROL_H
 #define CONTROL_H
 
+#include "config.h"
+
 typedef struct
 {
     int x;
