@@ -53,56 +53,50 @@ int main(void)
 
     DEBUG_PRINT("Oczekiwanie na dane z ESP");
 
-    while(1) //glowna petla programu
+    while(1)
+{
+    int length = uart_czytaj_linie(uart_file_desc, buffor, sizeof(buffor));
+    if (length <= 0) continue;
+
+    // Usunięcie znaków nowej linii
+    buffor[strcspn(buffor, "\r\n")] = 0;
+
+    int x, y, strzal;
+    work_mode_t mode;
+
+    if (sscanf(buffor, "%d,%d,%d,%d", &x, &y, &strzal, (int*)&mode) == 4)
     {
+        // Zmiana trybu
+        if (mode != WORK_MODE)
+            set_work_mode(mode);
 
-        if(WORK_MODE == WORK_MODE_MANUAL)
+        // Sterowanie osiami w trybie manual
+        if (WORK_MODE == WORK_MODE_MANUAL)
         {
-            int length = uart_czytaj_linie(uart_file_desc, buffor, sizeof(buffor)); // czyta jedna linie z UART, zapisuje do bufora i zwraca liczbe odczytanych znakow
-
-            if (length <= 0) // sprawdzenie czy cos odebrano
-            {
-                continue;
-            }
-
-            // Usuniecie znakow nowej linii
-            buffor[strcspn(buffor, "\r\n")] = 0;
-        
-            int x, y, strzal;
-            work_mode_t mode;
-
-            if (sscanf(buffor, "%d,%d,%d,%d", &x, &y, &strzal, (int*)&mode) == 4)
-            {
-                kierunek.x = x;
-                kierunek.y = y;
-                kierunek.strzal = strzal;
-                kierunek.work_mode = mode;
-
-                set_dir_x(kierunek.x);
-                set_dir_y(kierunek.y);
-
-                set_move_x(kierunek.x != 0);
-                set_move_y(kierunek.y != 0);
-
-                set_shoot(kierunek.strzal);
-
-                if(kierunek.work_mode != WORK_MODE)
-                set_work_mode(kierunek.work_mode);
-
-                DEBUG_PRINT("Kierunek: X=%d Y=%d Strzal=%d Mode=%d", kierunek.x, kierunek.y, kierunek.strzal, kierunek.work_mode);
-            }
-            else
-            {
-                DEBUG_PRINT("Nieprawidlowe dane: %s", buffor);
-            }
-        }
-        else if(WORK_MODE == WORK_MODE_AUTO)
-        {
-            //何も
+            kierunek.x = x;
+            kierunek.y = y;
+            set_dir_x(kierunek.x);
+            set_dir_y(kierunek.y);
+            set_move_x(kierunek.x != 0);
+            set_move_y(kierunek.y != 0);
         }
 
-        
+        // Sterowanie strzalem
+        kierunek.strzal = strzal;
+        set_shoot(kierunek.strzal);
+
+        DEBUG_PRINT("Kierunek: X=%d Y=%d Strzal=%d Mode=%d",
+                    (WORK_MODE==WORK_MODE_MANUAL? x : 0), 
+                    (WORK_MODE==WORK_MODE_MANUAL? y : 0), 
+                    kierunek.strzal, 
+                    WORK_MODE);
     }
+    else
+    {
+        DEBUG_PRINT("Nieprawidlowe dane: %s", buffor);
+    }
+
+}
 
     uart_close(uart_file_desc); // generalnie to program dziala w petli nieskonczonej
                                 // wiec UART sie nie zamknie chyba ze dodac funkcje do tego
