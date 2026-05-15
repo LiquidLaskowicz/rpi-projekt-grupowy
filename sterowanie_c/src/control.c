@@ -4,9 +4,9 @@
 
 // ================= PARAMETRY =================
 
-#define KP     1.0f
-#define ALPHA  0.2f
-#define DEADZONE 0.05f
+#define KP             1.0f
+#define ALPHA          0.2f
+#define AUTO_DEADZONE  0.05f  // Zmieniona nazwa, żeby nie było konfliktu z config.h
 
 // ================= STAN =================
 
@@ -19,22 +19,24 @@ velocity_t control_update(velocity_t input)
 {
     velocity_t out;
 
-    // DEADZONE na wejściu
-    if (fabs(input.vx) < DEADZONE) input.vx = 0.0f;
-    if (fabs(input.vy) < DEADZONE) input.vy = 0.0f;
+    // 1. DEADZONE na wejściu (błąd z YOLO)
+    // Jeśli błąd jest mniejszy niż 5%, uznajemy, że cel jest na środku
+    if (fabs(input.vx) < AUTO_DEADZONE) input.vx = 0.0f;
+    if (fabs(input.vy) < AUTO_DEADZONE) input.vy = 0.0f;
 
-    // regulator P
+    // 2. Regulator P
     float vx = KP * input.vx;
     float vy = KP * input.vy;
 
-    // filtr
+    // 3. Filtr EMA (wygładzanie ruchu)
     out.vx = ALPHA * vx + (1.0f - ALPHA) * vx_prev;
     out.vy = ALPHA * vy + (1.0f - ALPHA) * vy_prev;
 
     vx_prev = out.vx;
     vy_prev = out.vy;
 
-    // clamp
+    // 4. Clamp (ograniczenie do zakresu -1.0 do 1.0)
+    // To ważne, bo Arduino może nie spodziewać się większych wartości
     if (out.vx > 1.0f)  out.vx = 1.0f;
     if (out.vx < -1.0f) out.vx = -1.0f;
 

@@ -1,152 +1,148 @@
-// Glowna petla programu
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/i2c-dev.h>
+#include <time.h>
+#include <errno.h>
+#include <math.h>
 
 #include "config.h"
 #include "control.h"
-#include "uart.h"
-
-#include <time.h>
-#include <errno.h>
-
 #include "read_yolo.h"
+#include "i2c.h" 
 
-typedef struct
-{
-    int x;
-    int y;
-    int strzal;
-    work_mode_t work_mode;
-} kierunek_vector;
+// Globalny tryb pracy
+volatile work_mode_t WORK_MODE = WORK_MODE_MANUAL_NO_SHOOT;
 
-volatile work_mode_t WORK_MODE = WORK_MODE_MANUAL;
-
-void set_work_mode(work_mode_t mode)
-{
-    WORK_MODE = mode;
-    DEBUG_PRINT("Zmiana trybu na: %d", mode);
-}
-
-static inline void sleep_us(long us)
-{
+// Funkcja pomocnicza do usypiania (mikrosekundy)
+static inline void sleep_us(long us) {
     struct timespec ts;
     ts.tv_sec  = us / 1000000;
     ts.tv_nsec = (us % 1000000) * 1000;
     while (nanosleep(&ts, &ts) == -1 && errno == EINTR);
 }
 
-int main(void)
-{
-    printf("%s v%s\n", APP_NAME, APP_VERSION);
+int main(void) {
+    printf("%s v%s (I2C Master Mode)\n", APP_NAME, APP_VERSION);
 
-    DEBUG_PRINT("This metal gear is pretty solid");
-
-    int uart_file_desc; // deskryptor pliku UART
-    char buffor[64]; // buffor na dane z UART  // 64 bajty to w sumie overkill int ma 2 to wystarczy dla pewnosci 16 ale zostawie na razie, jednak nie bo wysyla vx i vy do espa
-    kierunek_vector kierunek = {0, 0, 0, 0}; // struktura przechowujace kierunek i zmienną strzał
-
-    uart_file_desc = uart_init(UART_DEVICE); // inicjalizacja UART (otwarcie urzadzenia i ustawienie predkosci transmisji)
-
-    if (uart_file_desc < 0)
-    {
-        DEBUG_PRINT("Blad inicjalizacji UART");
-        return 1;
-    } // sprawdzenie czy UART uruchomil sie poprawnie
-
-    int uart_out_desc;
-
-    uart_out_desc = uart_init(UART_DEVICE_OUT);
-    if (uart_out_desc < 0)
-    {
-        DEBUG_PRINT("Blad inicjalizacji UART OUT");
+    // 1. Inicjalizacja I2C
+    int i2c_fd = i2c_init(I2C_BUS);
+    if (i2c_fd < 0) {
+        fprintf(stderr, "Błąd krytyczny: Nie można otworzyć magistrali I2C\n");
         return 1;
     }
 
-    DEBUG_PRINT("Oczekiwanie na dane z ESP");
+    // Zmienne pomocnicze
+    char i2c_buffer[64];
+    int yolo_timeout_counter = 0;
+    const int MAX_YOLO_TIMEOUT = 50; // ok. 500ms (przy pętli 100Hz)
 
-    float vx_prev = 0.0f, vy_prev = 0.0f;
-    const float Kp = 1.0f; // wzmocnienie P regulatora
-    const float ALPHA = 0.2f;
+    // Zmienne dla danych z kontrolera (pad)
+    int ctrl_x = MID, ctrl_y = MID, ctrl_shoot = 0, ctrl_mode_raw = 0;
 
-    while(1)
-    {
-        // 1️⃣ odczyt trybu
-        int mode_val = read_gpio_mode();   // 0 = manual, 1 = auto
-        if ((work_mode_t)mode_val != WORK_MODE)
-        {
-            set_work_mode(mode_val);
-            control_reset();  // 🔥 ważne
+    // Zmienne dla auto-strzału
+    struct timespec last_shot_time = {0, 0};
+    const long COOLDOWN_MS = 1000; // 1 sekunda przerwy między strzałami w AUTO
+
+    DEBUG_PRINT("System wystartował. Czekam na dane...");
+
+    // --- GŁÓWNA PĘTLA PROGRAMU ---
+    while(1) {
+        float final_vx = 0.0f;
+        float final_vy = 0.0f;
+        int final_shoot = 0;
+
+        // 1️⃣ ODCZYT DANYCH Z KONTROLERA (Arduino 0x09)
+        if (i2c_set_address(i2c_fd, ADDR_CONTROLLER) == 0) {
+            if (i2c_read_string(i2c_fd, i2c_buffer, sizeof(i2c_buffer)) > 0) {
+                if (sscanf(i2c_buffer, "%d,%d,%d,%d", &ctrl_x, &ctrl_y, &ctrl_shoot, &ctrl_mode_raw) == 4) {
+                    
+                    // Jeśli nastąpiła zmiana trybu na padzie
+                    if ((work_mode_t)ctrl_mode_raw != WORK_MODE) {
+                        WORK_MODE = (work_mode_t)ctrl_mode_raw;
+                        control_reset();      // Resetujemy PID
+                        yolo_timeout_counter = 0;
+                        DEBUG_PRINT("Zmiana trybu na: %d", WORK_MODE);
+                    }
+                }
+            }
         }
 
-        if (WORK_MODE == WORK_MODE_MANUAL)
-        {
-            float x = read_gpio_x();      // już z deadzone
-            float y = read_gpio_y();      // już z deadzone
-            int strzal = read_gpio_shoot(); // 0 lub 1
+        // 2️⃣ LOGIKA WYBORU STEROWANIA
+        
+        // --- TRYBY RĘCZNE (0: Manual Safe, 1: Manual Fire) ---
+        if (WORK_MODE == WORK_MODE_MANUAL_NO_SHOOT || WORK_MODE == WORK_MODE_MANUAL_SHOOT) {
+            // Obliczanie prędkości z joysticka
+            if (abs(ctrl_x - MID) > DEADZONE)
+                final_vx = (float)(ctrl_x - MID) / (MID - DEADZONE);
+            if (abs(ctrl_y - MID) > DEADZONE)
+                final_vy = (float)(ctrl_y - MID) / (MID - DEADZONE);
 
-            // 4️⃣ wysyłka po UART do Arduino
-            char out_buf[64];
-            snprintf(out_buf, sizeof(out_buf), "%.2f,%.2f,%d,%d",
-                    x, y, (int)strzal, WORK_MODE);
-            uart_write(uart_out_desc, out_buf, strlen(out_buf));
-            uart_write(uart_out_desc, "\n", 1);
+            // Strzał: tylko w trybie 1 przekazujemy stan przycisku
+            if (WORK_MODE == WORK_MODE_MANUAL_SHOOT) {
+                final_shoot = ctrl_shoot;
+            } else {
+                final_shoot = 0; // W trybie 0 strzał zawsze zablokowany
+            }
         }
 
-        else if (WORK_MODE == WORK_MODE_AUTO)
-        {
-            float error_x = 0.0f, error_y = 0.0f;
+        // --- TRYB AUTOMATYCZNY (-1: YOLO Tracking) ---
+        else if (WORK_MODE == WORK_MODE_AUTO) {
+            float err_x = 0.0f, err_y = 0.0f;
             int status = 0;
 
-            // --- próbujemy pobrać dane z YOLO ---
-            if (!read_yolo_state(&status, &error_x, &error_y))
-            {
-                // brak danych → wysyłamy STOP do Arduino
-                char stop_buf[64];
-                snprintf(stop_buf, sizeof(stop_buf), "0.00,0.00,0,%d\n", WORK_MODE);
-                uart_write(uart_out_desc, stop_buf, strlen(stop_buf));
+            if (read_yolo_state(&status, &err_x, &err_y)) {
+                yolo_timeout_counter = 0; // Reset failsafe
+                
+                if (status == 1) { // Cel wykryty
+                    velocity_t out = control_update((velocity_t){err_x, err_y});
+                    final_vx = out.vx;
+                    final_vy = out.vy;
 
-                DEBUG_PRINT("AUTO: Brak danych z YOLO - wysłano STOP");
+                    // Logika auto-strzału z cooldownem
+                    if (fabs(err_x) < 0.05f && fabs(err_y) < 0.05f) {
+                        struct timespec now;
+                        clock_gettime(CLOCK_MONOTONIC, &now);
+                        
+                        long elapsed = (now.tv_sec - last_shot_time.tv_sec) * 1000 + 
+                                       (now.tv_nsec - last_shot_time.tv_nsec) / 1000000;
 
-                sleep_us(5000);
-                continue; // przechodzimy do kolejnej iteracji pętli
+                        if (elapsed >= COOLDOWN_MS) {
+                            final_shoot = 1;
+                            last_shot_time = now;
+                            DEBUG_PRINT("AUTO: Cel namierzony - STRZAŁ!");
+                        }
+                    }
+                }
+            } else {
+                // Brak danych z YOLO - czekamy chwilę zanim się zatrzymamy
+                yolo_timeout_counter++;
+                if (yolo_timeout_counter > MAX_YOLO_TIMEOUT) {
+                    final_vx = 0.0f; final_vy = 0.0f;
+                    final_shoot = 0;
+                } else {
+                    // Pomijamy wysyłkę, kontynuujemy poprzedni ruch
+                    goto wait_next;
+                }
             }
-
-            velocity_t input = { error_x, error_y };
-            velocity_t output;
-
-            if (status == 1)
-            {
-                // normalne sterowanie
-                output = control_update(input);
-            }
-            else
-            {
-                // brak celu → reset regulatora i zatrzymanie
-                control_reset();
-                output.vx = 0.0f;
-                output.vy = 0.0f;
-            }
-
-            // przygotowanie i wysyłka do Arduino
-            char out_buf[64];
-            snprintf(out_buf, sizeof(out_buf), "%.2f,%.2f,%d,%d\n",
-                    output.vx, output.vy, 0, WORK_MODE);
-
-            uart_write(uart_out_desc, out_buf, strlen(out_buf));
-
-            DEBUG_PRINT("AUTO: vx=%.2f vy=%.2f", output.vx, output.vy);
         }
-        sleep_us(5000); // np. 5 ms, zależnie od częstotliwości
+
+        // 3️⃣ WYSYŁKA ROZKAZÓW DO SILNIKÓW (Arduino 0x08)
+        char out_buf[64];
+        snprintf(out_buf, sizeof(out_buf), "%.2f,%.2f,%d,%d\n", 
+                 final_vx, final_vy, final_shoot, (int)WORK_MODE);
+
+        if (i2c_set_address(i2c_fd, ADDR_MOTORS) == 0) {
+            i2c_write_string(i2c_fd, out_buf);
+        }
+
+    wait_next:
+        sleep_us(10000); // Częstotliwość pętli 100Hz
     }
 
-
-
-    uart_close(uart_file_desc); // generalnie to program dziala w petli nieskonczonej
-                                // wiec UART sie nie zamknie chyba ze dodac funkcje do tego
-    control_close();             // tutaj to samo moze dla picu dodac cos takiego ze jak jakis blad wyrzuci to ma byc wyjsice z glownej petli i wywolanie tych funkcji
+    i2c_close(i2c_fd);
     return 0;
 }
-
-// moze zrobic tak zeby wejscie w jeden tryb pracy zamykalo rownolegly watek drugiego trybu ale nwm
