@@ -27,12 +27,6 @@
 #define THRESHOLD    120
 #define SHOOT_COOLDOWN_MS 300
 
-// --- GPIO (Jeśli RPi nadal czyta przyciski/tryby bezpośrednio) ---
-#define PIN_X       0   // WiringPi 0
-#define PIN_Y       1   // WiringPi 1
-#define PIN_SHOOT   2   // WiringPi 2
-#define PIN_MODE    3   // WiringPi 3
-
 // --- LOGIKA TRYBÓW PRACY ---
 typedef enum
 {
