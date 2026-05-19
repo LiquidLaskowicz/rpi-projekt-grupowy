@@ -38,10 +38,8 @@ int main(void) {
     // Zmienne pomocnicze
     char i2c_buffer[64];
     int yolo_timeout_counter = 0;
+    int debug_counter = 0;
     const int MAX_YOLO_TIMEOUT = 50; // ok. 500ms (przy pętli 100Hz)
-
-    // Zmienne dla danych z kontrolera (pad)
-    int ctrl_x = MID, ctrl_y = MID, ctrl_shoot = 0, ctrl_mode_raw = 0;
 
     // Zmienne dla auto-strzału
     struct timespec last_shot_time = {0, 0};
@@ -60,7 +58,7 @@ int main(void) {
         int final_shoot = 0;
 
         // 1️⃣ ODCZYT KONTROLERA (Adres 0x10)
-        if (select_i2c_device(i2c_fd, ADDR_CONTROLLER) == 0) {
+        if (i2c_set_address(i2c_fd, ADDR_CONTROLLER) == 0) {
             if (read(i2c_fd, i2c_buffer, sizeof(i2c_buffer) - 1) > 0) {
                 
                 // Parsujemy 7 wartości wysyłanych przez ESP32
@@ -132,38 +130,38 @@ int main(void) {
             float err_x = 0.0f, err_y = 0.0f;
             int status = 0;
 
-            if (read_yolo_state(&status, &err_x, &err_y)) {
-                yolo_timeout_counter = 0; 
-                
-                if (status == 1) { 
-                    velocity_t out = control_update((velocity_t){err_x, err_y});
-                    final_vx = out.vx;
-                    final_vy = out.vy;
+            // Zamiast starego wywołania, wywołujemy z 2 argumentami:
+        if (read_yolo_state(&err_x, &err_y)) {
+            yolo_timeout_counter = 0; // Jeśli funkcja zwróciła true, cel jest wykryty!
 
-                    // Auto-strzał z cooldownem (gdy cel na środku)
-                    if (fabs(err_x) < 0.05f && fabs(err_y) < 0.05f) {
-                        struct timespec now;
-                        clock_gettime(CLOCK_MONOTONIC, &now);
-                        
-                        long elapsed = (now.tv_sec - last_shot_time.tv_sec) * 1000 + 
-                                       (now.tv_nsec - last_shot_time.tv_nsec) / 1000000;
+            velocity_t out = control_update((velocity_t){err_x, err_y});
+            final_vx = out.vx;
+            final_vy = out.vy;
 
-                        if (elapsed >= COOLDOWN_MS) {
-                            final_shoot = 1;
-                            last_shot_time = now;
-                            DEBUG_PRINT("AUTO: Cel namierzony - STRZAŁ!");
-                        }
-                    }
-                }
-            } else {
-                yolo_timeout_counter++;
-                if (yolo_timeout_counter > MAX_YOLO_TIMEOUT) {
-                    final_vx = 0.0f; final_vy = 0.0f;
-                    final_shoot = 0;
-                } else {
-                    goto wait_next_iter; // Kontynuuj poprzedni ruch
+            // Logika auto-strzału z cooldownem (gdy cel na środku)
+            if (fabs(err_x) < 0.05f && fabs(err_y) < 0.05f) {
+                struct timespec now;
+                clock_gettime(CLOCK_MONOTONIC, &now);
+
+                long elapsed = (now.tv_sec - last_shot_time.tv_sec) * 1000 + 
+                            (now.tv_nsec - last_shot_time.tv_nsec) / 1000000;
+
+                if (elapsed >= COOLDOWN_MS) {
+                    final_shoot = 1;
+                    last_shot_time = now;
+                    DEBUG_PRINT("AUTO: Cel namierzony - STRZAŁ!");
                 }
             }
+        } else {
+            // Jeśli zwróciła false, tzn. brak celu lub brak danych z YOLO
+            yolo_timeout_counter++;
+            if (yolo_timeout_counter > MAX_YOLO_TIMEOUT) {
+                final_vx = 0.0f; final_vy = 0.0f;
+                final_shoot = 0;
+            } else {
+                goto wait_next_iter; 
+            }
+        }
         }
 
         // 3️⃣ WYSYŁKA ROZKAZÓW DO SILNIKÓW (Arduino 0x08)
@@ -172,7 +170,7 @@ int main(void) {
         snprintf(out_buf, sizeof(out_buf), "%.2f,%.2f,%d,%d\n", 
                  final_vx, final_vy, final_shoot, (int)WORK_MODE);
 
-        if (select_i2c_device(i2c_fd, ADDR_MOTORS) == 0) {
+        if (i2c_set_address(i2c_fd, ADDR_MOTORS) == 0) {
             write(i2c_fd, out_buf, strlen(out_buf));
         }
 

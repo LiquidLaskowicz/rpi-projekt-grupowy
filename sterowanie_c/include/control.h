@@ -16,4 +16,6 @@ typedef struct {
 
 velocity_t control_update(velocity_t input);
 
+void control_reset(void);
+
 #endif
