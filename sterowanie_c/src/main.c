@@ -128,7 +128,6 @@ int main(void) {
         // --- TRYB AUTOMATYCZNY (-1: YOLO) ---
         else if (WORK_MODE == WORK_MODE_AUTO) {
             float err_x = 0.0f, err_y = 0.0f;
-            int status = 0;
 
             // Zamiast starego wywołania, wywołujemy z 2 argumentami:
         if (read_yolo_state(&err_x, &err_y)) {

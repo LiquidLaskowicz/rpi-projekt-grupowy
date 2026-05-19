@@ -39,7 +39,7 @@ bool read_yolo_state(float *error_x, float *error_y)
                 char *start = strrchr(buf, '\n');
                 if (!start) start = buf; else start++;
                 
-                strncpy(last_valid_line, start, sizeof(last_valid_line)-1);
+                snprintf(last_valid_line, sizeof(last_valid_line), "%s", start);
                 found_data = true;
             }
         }
