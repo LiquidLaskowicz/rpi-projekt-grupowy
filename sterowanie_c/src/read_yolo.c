@@ -5,7 +5,8 @@
 #include <unistd.h>
 #include <string.h>
 
-bool read_yolo_state(int *status, float *error_x, float *error_y)
+// 1. ZMIANA: Nagłówek funkcji przyjmuje teraz tylko dwa argumenty (współrzędne błędu)
+bool read_yolo_state(float *error_x, float *error_y)
 {
     static int fifo_fd = -1;
     char buf[128];
@@ -24,7 +25,6 @@ bool read_yolo_state(int *status, float *error_x, float *error_y)
     }
 
     // 2. Czytamy WSZYSTKO co jest w rurze, żeby dojść do najnowszych danych
-    // FIFO może mieć zakolejkowane stare klatki. Chcemy tylko ostatnią.
     while (true)
     {
         ssize_t n = read(fifo_fd, buf, sizeof(buf) - 1);
@@ -57,9 +57,13 @@ bool read_yolo_state(int *status, float *error_x, float *error_y)
     // 3. Parsowanie ostatniej znalezionej klatki
     if (found_data)
     {
-        if (sscanf(last_valid_line, "%d,%f,%f", status, error_x, error_y) == 3)
+        int local_status = 0; // 2. ZMIANA: Tworzymy zwykłą, lokalną zmienną int na status z YOLO
+        
+        // Parsujemy dane do naszej zmiennej lokalnej oraz przez wskaźniki error_x, error_y
+        if (sscanf(last_valid_line, "%d,%f,%f", &local_status, error_x, error_y) == 3)
         {
-            return true;
+            // 3. ZMIANA: Zwracamy true tylko wtedy, gdy ramka jest poprawna ORAZ status==1 (cel wykryty)
+            return (local_status == 1);
         }
     }
 
