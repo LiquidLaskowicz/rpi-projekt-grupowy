@@ -7,7 +7,7 @@
 
 // --- KONFIGURACJA I2C ---
 #define I2C_BUS             "/dev/i2c-1"
-#define ADDR_CONTROLLER     0x09  // Arduino z joystickiem (Slave)
+#define ADDR_CONTROLLER     0x10  // Arduino z joystickiem (Slave)
 #define ADDR_MOTORS         0x08  // Arduino od silnikow (Slave)
 
 // Debugowanie [1 - DEBUG ON / 0 - DEBUG OFF]
