@@ -81,22 +81,25 @@ int main(void) {
                     work_mode_t nowy_tryb;
 
                     if (esp_tryb == -1) {
-                        nowy_tryb = WORK_MODE_AUTO; // ESP32 tryb = -1 to u nas AUTO
-                    } 
-                    else if (esp_bezp == 1) {
-                        nowy_tryb = WORK_MODE_MANUAL_NO_SHOOT; // Zabezpieczony (Safe)
+                        // Tryb AUTO (YOLO)
+                        nowy_tryb = WORK_MODE_AUTO; 
                     } 
                     else {
-                        nowy_tryb = WORK_MODE_MANUAL_SHOOT; // Odbezpieczony (Fire)
+                        // Tryb MANUAL (Tryb był 1)
+                        if (esp_bezp == 1) {
+                            nowy_tryb = WORK_MODE_MANUAL_NO_SHOOT; // Bezpieczny
+                        } else {
+                            nowy_tryb = WORK_MODE_MANUAL_SHOOT;    // Odbezpieczony
+                        }
                     }
 
                     // Jeśli nastąpiła zmiana trybu, resetujemy PID
                     if (nowy_tryb != WORK_MODE) {
-                        WORK_MODE = nowy_tryb;
-                        control_reset();
-                        yolo_timeout_counter = 0;
-                        DEBUG_PRINT("Zmiana trybu na RPi: %d", WORK_MODE);
-                    }
+                    WORK_MODE = nowy_tryb;
+                    control_reset();
+                    yolo_timeout_counter = 0;
+                    DEBUG_PRINT("Zmiana trybu na RPi: %d", WORK_MODE);
+}
                 }
             }
         }
@@ -117,7 +120,7 @@ int main(void) {
             else if (dol == 1 && gora == 0)    final_vy = -1.0f;
             else                               final_vy = 0.0f;
 
-            // Strzał: Aktywny tylko w trybie MANUAL_SHOOT i gdy ESP wysyła odbezpieczony strzał (-1)
+            // Strzał: Aktywny tylko w trybie MANUAL_SHOOT i gdy ESP wysyła -1
             if (WORK_MODE == WORK_MODE_MANUAL_SHOOT && esp_strzal == -1) {
                 final_shoot = 1;
             } else {
