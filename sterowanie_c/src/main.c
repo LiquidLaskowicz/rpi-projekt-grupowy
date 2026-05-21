@@ -169,6 +169,9 @@ int main(void) {
 
         // 3️⃣ WYSYŁKA ROZKAZÓW DO SILNIKÓW (Arduino 0x08)
         // Format dla silników zostaje bez zmian: "vx,vy,shoot,mode\n"
+
+
+        DEBUG_PRINT("TUŻ PRZED WYSYŁKĄ: vx=%.2f, vy=%.2f, shoot=%d", final_vx, final_vy, final_shoot);
         char out_buf[64];
         snprintf(out_buf, sizeof(out_buf), "%.2f,%.2f,%d,%d\n", 
                  final_vx, final_vy, final_shoot, (int)WORK_MODE);
