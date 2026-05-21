@@ -108,7 +108,7 @@ int main(void) {
         
         // --- TRYBY RĘCZNE (0: Manual Safe, 1: Manual Fire) ---
         if (WORK_MODE == WORK_MODE_MANUAL_NO_SHOOT || WORK_MODE == WORK_MODE_MANUAL_SHOOT) {
-            
+            DEBUG_PRINT("JESTEM W TRYBIE MANUALNYM!"); // Dodaj to!
             // Mapowanie przycisków cyfrowych na pełną prędkość [-1.0, 1.0]
             // Oś X (Prawo / Lewo)
             if (prawo == 1 && lewo == 0)       final_vx = 1.0f;
